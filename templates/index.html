@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI SQL Review Tool</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/themes/prism.min.css" rel="stylesheet">
+    <style>
+        .sidebar {
+            min-height: 100vh;
+            background-color: #f8f9fa;
+        }
+        .sql-editor {
+            min-height: 300px;
+            height: 300px;
+            font-family: 'Courier New', monospace;
+        }
+        .review-section {
+            border: 1px solid #dee2e6;
+            border-radius: 0.375rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        .status-excellent { color: #198754; }
+        .status-good { color: #0d6efd; }
+        .status-needs-improvement { color: #fd7e14; }
+        .status-has-issues { color: #dc3545; }
+        .score-circle {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+        }
+        .collapse-icon {
+            transition: transform 0.2s ease;
+        }
+        .collapse-icon.collapsed {
+            transform: rotate(-90deg);
+        }
+       
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 侧边栏 -->
+            <div class="col-md-3 sidebar p-3">
+                <h4>AI SQL Review Tool</h4>
+                
+                <!-- 数据库连接 - 移到顶部 -->
+                <div class="mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0" data-bs-toggle="collapse" data-bs-target="#db-connections-collapse" style="cursor: pointer;">
+                            <i class="bi bi-chevron-down" id="db-connections-icon"></i> 数据库连接
+                        </h6>
+                        <button class="btn btn-sm btn-outline-primary" onclick="showAddConnectionModal()">
+                            <i class="bi bi-plus"></i>
+                        </button>
+                    </div>
+                    <div class="collapse show" id="db-connections-collapse">
+                        <div class="list-group" id="db-connections" style="max-height: 300px; overflow-y: auto;">
+                            <div class="list-group-item text-muted">暂无连接</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SQL语句列表 -->
+                <div class="mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0" data-bs-toggle="collapse" data-bs-target="#sql-statements-collapse" style="cursor: pointer;">
+                            <i class="bi bi-chevron-down" id="sql-statements-icon"></i> SQL语句
+                        </h6>
+                        <button class="btn btn-sm btn-outline-primary" onclick="addNewSQL()">
+                            <i class="bi bi-plus"></i>
+                        </button>
+                    </div>
+                    <div class="collapse show" id="sql-statements-collapse">
+                        <div class="list-group" id="sql-statements" style="max-height: 400px; overflow-y: auto;">
+                            <div class="list-group-item text-muted">暂无SQL语句</div>
+                        </div>
+                        <div class="mt-2" id="sql-pagination">
+                            <!-- 分页控件将在这里显示 -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- LLM配置 -->
+                <div class="mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0" data-bs-toggle="collapse" data-bs-target="#llm-configs-collapse" style="cursor: pointer;">
+                            <i class="bi bi-chevron-down" id="llm-configs-icon"></i> AI模型配置
+                        </h6>
+                        <button class="btn btn-sm btn-outline-primary" onclick="showLLMConfigModal()">
+                            <i class="bi bi-gear"></i>
+                        </button>
+                    </div>
+                    <div class="collapse show" id="llm-configs-collapse">
+                        <div class="list-group" id="llm-configs" style="max-height: 200px; overflow-y: auto;">
+                            <div class="list-group-item text-muted">暂无配置</div>
+                        </div>
+                        <div class="mt-2">
+                            <select class="form-select form-select-sm" id="llm-config-select">
+                                <option value="">选择AI模型</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 主内容区 -->
+            <div class="col-md-9 p-4">
+                <!-- 工具栏 -->
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <button class="btn btn-outline-primary btn-sm" onclick="showImportModal()">
+                            <i class="bi bi-upload"></i> 导入CSV
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="exportSQL()">
+                            <i class="bi bi-download"></i> 导出CSV
+                        </button>
+                    </div>
+                    <div class="d-flex align-items-center ">
+                        <div class="d-flex align-items-center">
+                            <label style="width: 80px !important" class="form-label me-2 mb-0 text-danger fw-bold">数据库</label>
+                            <select class="form-select form-select-sm" id="db-connection-select" style="min-width: 200px;">
+                                <option value="">选择数据库连接</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-outline-info btn-sm ms-2" onclick="showDatabaseExplorer()">
+                            <i class="bi bi-database"></i> 浏览
+                        </button>
+                        
+                       
+                       
+                       
+                    </div>
+                </div>
+
+                <!-- SQL编辑器 -->
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">SQL编辑器</h5>
+                        <div>
+                            <button class="btn btn-outline-info btn-sm" onclick="formatSQL()" title="格式化SQL">
+                                <i class="bi bi-code"></i> 格式化
+                            </button>
+                            <button class="btn btn-primary" onclick="reviewSQL()" id="review-btn">
+                                <span class="spinner-border spinner-border-sm d-none" id="review-spinner"></span>
+                                AI审查
+                            </button>
+                            <button class="btn btn-outline-secondary" onclick="saveSQL()">保存</button>
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+                                    版本
+                                </button>
+                                <ul class="dropdown-menu" id="version-dropdown">
+                                    <li><a class="dropdown-item" href="#" onclick="showVersionHistory()">查看历史版本</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="sql-title" class="form-label">SQL标题 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="sql-title" placeholder="输入SQL标题" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="sql-description" class="form-label">业务描述</label>
+                            <textarea class="form-control" id="sql-description" rows="2" 
+                                placeholder="描述这个SQL语句的业务目的和预期功能"></textarea>
+                        </div>
+                       
+                        <div class="mb-3">
+                            <label for="sql-content" class="form-label">SQL语句 <span class="text-danger">*</span></label>
+                            <textarea class="form-control sql-editor" id="sql-content" 
+                                placeholder="输入或粘贴SQL语句" required></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 审查报告 -->
+                <div class="card" id="review-report" style="display: none;">
+                    <div class="card-header">
+                        <h5 class="mb-0">AI审查报告</h5>
+                    </div>
+                    <div class="card-body" id="review-content">
+                        <!-- 审查结果将在这里显示 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加数据库连接模态框 -->
+    <div class="modal fade" id="addConnectionModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">添加数据库连接</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="connection-form">
+                        <div class="mb-3">
+                            <label for="conn-name" class="form-label">连接名称</label>
+                            <input type="text" class="form-control" id="conn-name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="conn-type" class="form-label">数据库类型</label>
+                            <select class="form-select" id="conn-type" required>
+                                <option value="">选择数据库类型</option>
+                                <option value="mysql">MySQL</option>
+                                <option value="postgresql">PostgreSQL</option>
+                                <option value="sqlserver">SQL Server</option>
+                                <option value="oracle">Oracle</option>
+                                <option value="sqlite">SQLite</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="conn-host" class="form-label">主机地址</label>
+                            <input type="text" class="form-control" id="conn-host">
+                        </div>
+                        <div class="mb-3">
+                            <label for="conn-port" class="form-label">端口</label>
+                            <input type="number" class="form-control" id="conn-port">
+                        </div>
+                        <div class="mb-3">
+                            <label for="conn-database" class="form-label">数据库名</label>
+                            <input type="text" class="form-control" id="conn-database">
+                        </div>
+                        <div class="mb-3">
+                            <label for="conn-username" class="form-label">用户名</label>
+                            <input type="text" class="form-control" id="conn-username">
+                        </div>
+                        <div class="mb-3">
+                            <label for="conn-password" class="form-label">密码</label>
+                            <input type="password" class="form-control" id="conn-password">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-outline-info" onclick="testConnection()">
+                        <span class="spinner-border spinner-border-sm d-none" id="test-spinner"></span>
+                        测试连接
+                    </button>
+                    <button type="button" class="btn btn-primary" onclick="saveConnection()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LLM配置模态框 -->
+    <div class="modal fade" id="llmConfigModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">AI模型配置</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="llm-config-form">
+                        <div class="mb-3">
+                            <label for="llm-name" class="form-label">配置名称</label>
+                            <input type="text" class="form-control" id="llm-name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="llm-provider" class="form-label">AI提供商</label>
+                            <select class="form-select" id="llm-provider" required>
+                                <option value="">选择提供商</option>
+                                <option value="openai">OpenAI</option>
+                                <option value="deepseek">DeepSeek</option>
+                                <option value="qwen">通义千问</option>
+                                <option value="ollama">Ollama</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="llm-model" class="form-label">模型名称</label>
+                            <input type="text" class="form-control" id="llm-model" placeholder="如: gpt-3.5-turbo" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="llm-api-key" class="form-label">API密钥</label>
+                            <input type="password" class="form-control" id="llm-api-key">
+                        </div>
+                        <div class="mb-3">
+                            <label for="llm-base-url" class="form-label">API基础URL</label>
+                            <input type="url" class="form-control" id="llm-base-url" placeholder="如: https://api.openai.com/v1">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="saveLLMConfig()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导入CSV模态框 -->
+    <div class="modal fade" id="importModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">导入CSV文件</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="csv-file" class="form-label">选择CSV文件</label>
+                        <input type="file" class="form-control" id="csv-file" accept=".csv" onchange="previewCSV()">
+                        <div class="form-text">CSV格式：序号,SQL语句,描述</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="import-connection" class="form-label">默认数据库连接</label>
+                        <select class="form-select" id="import-connection">
+                            <option value="">选择数据库连接</option>
+                        </select>
+                    </div>
+                    <div id="csv-preview" class="mt-3" style="display: none;">
+                        <h6>预览数据：</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm" id="csv-preview-table">
+                                <thead></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="importCSV()" id="import-btn" disabled>导入</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 数据库浏览器模态框 -->
+    <div class="modal fade" id="databaseExplorerModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">数据库浏览器</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="explorer-connection" class="form-label">选择数据库连接</label>
+                                <select class="form-select" id="explorer-connection" onchange="loadDatabaseSchema()">
+                                    <option value="">选择连接</option>
+                                </select>
+                            </div>
+                            <div id="schema-tree" class="border rounded p-2" style="height: 400px; overflow-y: auto;">
+                                <div class="text-muted">请先选择数据库连接</div>
+                            </div>
+                        </div>
+                        <div class="col-md-8">
+                            <div id="object-details" class="border rounded p-3" style="height: 450px; overflow-y: auto;">
+                                <div class="text-muted">选择左侧对象查看详细信息</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 版本历史模态框 -->
+    <div class="modal fade" id="versionHistoryModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">版本历史</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="version-list" class="mb-3">
+                        <!-- 版本列表将在这里显示 -->
+                    </div>
+                    <div id="version-diff" style="display: none;">
+                        <h6>版本对比：</h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6 class="text-muted">旧版本</h6>
+                                <pre id="old-version-content" class="border rounded p-2" style="height: 300px; overflow-y: auto;"></pre>
+                            </div>
+                            <div class="col-md-6">
+                                <h6 class="text-muted">新版本</h6>
+                                <pre id="new-version-content" class="border rounded p-2" style="height: 300px; overflow-y: auto;"></pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                    <button type="button" class="btn btn-primary" onclick="restoreVersion()" id="restore-btn" style="display: none;">恢复此版本</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/components/prism-core.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/components/prism-sql.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="/static/js/app.js"></script>
+</body>
+</html> 

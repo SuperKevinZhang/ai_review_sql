@@ -242,5 +242,9 @@ python -m pytest --cov=app tests/
 - Docker部署支持
 
 ---
+###代码统计
+```bash
+  cloc --match-f='\.(py|js|html|md)$' --exclude-dir=venv .
+```  
 
 **Made with ❤️ by AI SQL Review Team**

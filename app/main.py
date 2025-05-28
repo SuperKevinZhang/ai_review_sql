@@ -1,5 +1,6 @@
 """FastAPI应用主文件"""
 
+import os
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -10,6 +11,34 @@ from app.config import get_settings
 from app.models.database import create_tables
 from app.api import router as api_router
 
+# 设置Oracle环境变量
+def setup_oracle_environment():
+    """设置Oracle客户端环境变量"""
+    oracle_home = "/opt/oracle/instantclient_19_8"
+    if os.path.exists(oracle_home):
+        os.environ["ORACLE_HOME"] = oracle_home
+        
+        # 设置库路径
+        ld_library_path = os.environ.get("LD_LIBRARY_PATH", "")
+        if oracle_home not in ld_library_path:
+            os.environ["LD_LIBRARY_PATH"] = f"{oracle_home}:{ld_library_path}"
+        
+        # macOS特定的动态库路径
+        dyld_library_path = os.environ.get("DYLD_LIBRARY_PATH", "")
+        if oracle_home not in dyld_library_path:
+            os.environ["DYLD_LIBRARY_PATH"] = f"{oracle_home}:{dyld_library_path}"
+        
+        # 设置PATH
+        path = os.environ.get("PATH", "")
+        if oracle_home not in path:
+            os.environ["PATH"] = f"{oracle_home}:{path}"
+        
+        print(f"Oracle环境变量已设置: ORACLE_HOME={oracle_home}")
+    else:
+        print(f"警告: Oracle Instant Client目录不存在: {oracle_home}")
+
+# 在应用启动前设置Oracle环境
+setup_oracle_environment()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -45,6 +74,12 @@ app.include_router(api_router, prefix="/api")
 async def index(request: Request):
     """首页"""
     return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.get("/review-results", response_class=HTMLResponse)
+async def review_results(request: Request):
+    """SQL审查结果页面"""
+    return templates.TemplateResponse("review_results.html", {"request": request})
 
 
 @app.get("/health")

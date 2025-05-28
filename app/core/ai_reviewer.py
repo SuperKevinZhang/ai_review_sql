@@ -39,19 +39,41 @@ class AIReviewer:
         try:
             # 构建提示词
             prompt = self._build_prompt(sql_content, description, schema_info)
+            # 打印提示词
+            print("***************************提示词:")
+            print(prompt)
             
             # 调用LLM
+            print("***************************开始调用LLM...")
             response = self._call_llm(prompt)
+            print("***************************LLM调用完成")
             
             # 解析响应
             review_result = self._parse_response(response)
+            # 打印响应
+            print("***************************响应:")
+            print(review_result)
             
             return review_result
         
         except Exception as e:
+            print(f"***************************AI审查过程中出错: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return {
                 "error": f"AI审查失败: {str(e)}",
-                "overall_status": "error"
+                "overall_assessment": {
+                    "status": "error",
+                    "score": 0,
+                    "summary": f"AI审查失败: {str(e)}"
+                },
+                "consistency": {"status": "error", "score": 0, "details": "", "suggestions": ""},
+                "conventions": {"status": "error", "score": 0, "details": "", "suggestions": ""},
+                "performance": {"status": "error", "score": 0, "details": "", "suggestions": ""},
+                "security": {"status": "error", "score": 0, "details": "", "suggestions": ""},
+                "readability": {"status": "error", "score": 0, "details": "", "suggestions": ""},
+                "maintainability": {"status": "error", "score": 0, "details": "", "suggestions": ""},
+                "optimized_sql": ""
             }
     
     def _build_prompt(self, sql_content: str, description: str, schema_info: Dict[str, Any]) -> str:
@@ -81,6 +103,7 @@ class AIReviewer:
 **1. 一致性分析（SQL与描述的一致性）:**
 - SQL查询是否准确实现了用户描述的功能？
 - 如果不一致，请解释差异并建议修改SQL或描述。
+- 如果意图描述为空，请根据SQL内容生成意图描述。
 
 **2. SQL规范性和最佳实践:**
 - 是否遵循命名约定（表、列、别名）。
@@ -106,6 +129,7 @@ class AIReviewer:
 - 是否有效使用别名？
 - 复杂逻辑是否有足够的注释？
 - 整体逻辑流程和复杂性。
+- 是否有足够的注视
 
 **6. 可维护性:**
 - 将来修改这个SQL有多容易？
@@ -159,7 +183,7 @@ class AIReviewer:
         "details": "详细分析",
         "suggestions": "改进建议"
     }},
-    "optimized_sql": "优化后的SQL建议（如果需要）"
+    "optimized_sql": "优化后的SQL建议（如果需要），优化后SQL语句需要包含注释，注释需要解释优化后的SQL语句"
 }}
 ```
 
@@ -171,27 +195,36 @@ class AIReviewer:
         """格式化数据库模式信息"""
         schema_text = ""
         
-        # 格式化表信息
+        # 处理SchemaExtractor返回的DDL格式
         if schema_info.get("tables"):
             schema_text += "**表结构:**\n"
-            for table in schema_info["tables"]:
-                schema_text += f"\n表名: {table['name']}\n"
-                schema_text += "列信息:\n"
-                for col in table.get("columns", []):
-                    nullable = "可空" if col.get("is_nullable") else "非空"
-                    comment = f" - {col.get('comment', '')}" if col.get('comment') else ""
-                    schema_text += f"  - {col['name']}: {col['type']} ({nullable}){comment}\n"
-                
-                if table.get("indexes"):
-                    schema_text += "索引:\n"
-                    for idx in table["indexes"]:
-                        unique = "唯一" if idx.get("is_unique") else "普通"
-                        columns = ", ".join(idx.get("columns", []))
-                        schema_text += f"  - {idx['name']}: {unique}索引 ({columns})\n"
-                
-                if table.get("primary_keys"):
-                    pk_cols = ", ".join(table["primary_keys"])
-                    schema_text += f"主键: {pk_cols}\n"
+            
+            # 检查是否是DDL格式（字典形式）
+            if isinstance(schema_info["tables"], dict):
+                for table_name, table_info in schema_info["tables"].items():
+                    schema_text += f"\n表名: {table_name}\n"
+                    if table_info.get("ddl"):
+                        schema_text += f"DDL:\n```sql\n{table_info['ddl']}\n```\n"
+            else:
+                # 处理旧格式（列表形式）
+                for table in schema_info["tables"]:
+                    schema_text += f"\n表名: {table['name']}\n"
+                    schema_text += "列信息:\n"
+                    for col in table.get("columns", []):
+                        nullable = "可空" if col.get("is_nullable") else "非空"
+                        comment = f" - {col.get('comment', '')}" if col.get('comment') else ""
+                        schema_text += f"  - {col['name']}: {col['type']} ({nullable}){comment}\n"
+                    
+                    if table.get("indexes"):
+                        schema_text += "索引:\n"
+                        for idx in table["indexes"]:
+                            unique = "唯一" if idx.get("is_unique") else "普通"
+                            columns = ", ".join(idx.get("columns", []))
+                            schema_text += f"  - {idx['name']}: {unique}索引 ({columns})\n"
+                    
+                    if table.get("primary_keys"):
+                        pk_cols = ", ".join(table["primary_keys"])
+                        schema_text += f"主键: {pk_cols}\n"
         
         # 格式化视图信息
         if schema_info.get("views"):

@@ -8,6 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.models.db_connection import DatabaseConnection
 from app.core.encryption import EncryptionService
 from app.core.schema_extractor import SchemaExtractor
+from app.utils.database_utils import DatabaseUtils
 
 
 class DatabaseConnectionService:
@@ -16,6 +17,7 @@ class DatabaseConnectionService:
     def __init__(self, db: Session):
         self.db = db
         self.encryption_service = EncryptionService()
+        self.database_utils = DatabaseUtils()
     
     def test_connection_object(self, db_connection: DatabaseConnection) -> Dict[str, Any]:
         """
@@ -34,12 +36,12 @@ class DatabaseConnectionService:
             # 创建引擎并测试连接
             engine = create_engine(connection_string, pool_timeout=10)
             
+            # 获取数据库特定的测试查询
+            test_query = self.database_utils.get_database_specific_test_query(db_connection.db_type)
+            
             with engine.connect() as conn:
                 # 执行简单查询测试连接
-                if db_connection.db_type.value == "sqlite":
-                    result = conn.execute(text("SELECT 1"))
-                else:
-                    result = conn.execute(text("SELECT 1 as test"))
+                result = conn.execute(text(test_query))
                 
                 row = result.fetchone()
                 if row:
@@ -75,18 +77,18 @@ class DatabaseConnectionService:
             if not db_connection:
                 return {"success": False, "error": "数据库连接不存在"}
             
-            # 构建连接字符串
-            connection_string = self._build_connection_string(db_connection)
+            # 使用共通工具类构建连接字符串
+            connection_string = self.database_utils.build_connection_string(db_connection)
             
             # 创建引擎并测试连接
             engine = create_engine(connection_string, pool_timeout=10)
             
+            # 获取数据库特定的测试查询
+            test_query = self.database_utils.get_database_specific_test_query(db_connection.db_type)
+            
             with engine.connect() as conn:
                 # 执行简单查询测试连接
-                if db_connection.db_type.value == "sqlite":
-                    result = conn.execute(text("SELECT 1"))
-                else:
-                    result = conn.execute(text("SELECT 1 as test"))
+                result = conn.execute(text(test_query))
                 
                 row = result.fetchone()
                 if row:
@@ -127,8 +129,8 @@ class DatabaseConnectionService:
             if not db_connection:
                 return {"error": "数据库连接不存在"}
             
-            # 构建连接字符串
-            connection_string = self._build_connection_string(db_connection)
+            # 使用共通工具类构建连接字符串
+            connection_string = self.database_utils.build_connection_string(db_connection)
             
             # 创建引擎
             engine = create_engine(connection_string)
@@ -172,8 +174,8 @@ class DatabaseConnectionService:
             if not db_connection:
                 return {"error": "数据库连接不存在"}
             
-            # 构建连接字符串
-            connection_string = self._build_connection_string(db_connection)
+            # 使用共通工具类构建连接字符串
+            connection_string = self.database_utils.build_connection_string(db_connection)
             
             # 创建引擎和模式提取器
             engine = create_engine(connection_string)
@@ -192,36 +194,28 @@ class DatabaseConnectionService:
         except Exception as e:
             return {"error": f"获取{object_type}详细信息失败: {str(e)}"}
     
-    def _build_connection_string(self, db_connection: DatabaseConnection) -> str:
-        """构建数据库连接字符串"""
-        # 解密密码
-        password = self.encryption_service.decrypt_password(db_connection.password)
-        
-        if db_connection.db_type.value == "mysql":
-            return f"mysql+pymysql://{db_connection.username}:{password}@{db_connection.host}:{db_connection.port}/{db_connection.database_name}"
-        elif db_connection.db_type.value == "postgresql":
-            return f"postgresql+psycopg2://{db_connection.username}:{password}@{db_connection.host}:{db_connection.port}/{db_connection.database_name}"
-        elif db_connection.db_type.value == "sqlserver":
-            return f"mssql+pyodbc://{db_connection.username}:{password}@{db_connection.host}:{db_connection.port}/{db_connection.database_name}?driver=ODBC+Driver+17+for+SQL+Server"
-        elif db_connection.db_type.value == "sqlite":
-            return f"sqlite:///{db_connection.database_name}"
-        else:
-            raise ValueError(f"不支持的数据库类型: {db_connection.db_type.value}")
-
     def _build_connection_string_for_object(self, db_connection: DatabaseConnection) -> str:
         """构建数据库连接字符串（用于测试对象，密码未加密）"""
         password = db_connection.password or ""
+        username = db_connection.username
+        host = db_connection.host
+        port = db_connection.port
+        database_name = db_connection.database_name
         
-        if db_connection.db_type.value == "mysql":
-            return f"mysql+pymysql://{db_connection.username}:{password}@{db_connection.host}:{db_connection.port}/{db_connection.database_name}"
-        elif db_connection.db_type.value == "postgresql":
-            return f"postgresql+psycopg2://{db_connection.username}:{password}@{db_connection.host}:{db_connection.port}/{db_connection.database_name}"
-        elif db_connection.db_type.value == "sqlserver":
-            return f"mssql+pyodbc://{db_connection.username}:{password}@{db_connection.host}:{db_connection.port}/{db_connection.database_name}?driver=ODBC+Driver+17+for+SQL+Server"
-        elif db_connection.db_type.value == "sqlite":
-            return f"sqlite:///{db_connection.database_name}"
+        db_type = db_connection.db_type.value
+        
+        if db_type == "mysql":
+            return f"mysql+pymysql://{username}:{password}@{host}:{port}/{database_name}"
+        elif db_type == "postgresql":
+            return f"postgresql+psycopg2://{username}:{password}@{host}:{port}/{database_name}"
+        elif db_type == "sqlserver":
+            return f"mssql+pyodbc://{username}:{password}@{host}:{port}/{database_name}?driver=ODBC+Driver+17+for+SQL+Server"
+        elif db_type == "oracle":
+            return f"oracle+cx_oracle://{username}:{password}@{host}:{port}/?service_name={database_name}"
+        elif db_type == "sqlite":
+            return f"sqlite:///{database_name}"
         else:
-            raise ValueError(f"不支持的数据库类型: {db_connection.db_type.value}")
+            raise ValueError(f"不支持的数据库类型: {db_type}")
     
     def _get_database_info(self, conn, db_connection: DatabaseConnection) -> Dict[str, Any]:
         """获取数据库基本信息"""
@@ -231,17 +225,29 @@ class DatabaseConnectionService:
                 "database_name": db_connection.database_name
             }
             
-            if db_connection.db_type.value == "mysql":
+            db_type = db_connection.db_type.value
+            
+            if db_type == "mysql":
                 result = conn.execute(text("SELECT VERSION() as version"))
                 row = result.fetchone()
                 if row:
                     info["version"] = row[0]
-            elif db_connection.db_type.value == "postgresql":
+            elif db_type == "postgresql":
                 result = conn.execute(text("SELECT version()"))
                 row = result.fetchone()
                 if row:
                     info["version"] = row[0]
-            elif db_connection.db_type.value == "sqlite":
+            elif db_type == "oracle":
+                result = conn.execute(text("SELECT * FROM v$version WHERE banner LIKE 'Oracle%'"))
+                row = result.fetchone()
+                if row:
+                    info["version"] = row[0]
+            elif db_type == "sqlserver":
+                result = conn.execute(text("SELECT @@VERSION"))
+                row = result.fetchone()
+                if row:
+                    info["version"] = row[0]
+            elif db_type == "sqlite":
                 result = conn.execute(text("SELECT sqlite_version()"))
                 row = result.fetchone()
                 if row:
@@ -256,7 +262,9 @@ class DatabaseConnectionService:
         tables = []
         
         try:
-            if db_connection.db_type.value == "mysql":
+            db_type = db_connection.db_type.value
+            
+            if db_type == "mysql":
                 query = text("""
                     SELECT table_name, table_comment 
                     FROM information_schema.tables 
@@ -264,7 +272,7 @@ class DatabaseConnectionService:
                     AND table_type = 'BASE TABLE'
                     ORDER BY table_name
                 """)
-            elif db_connection.db_type.value == "postgresql":
+            elif db_type == "postgresql":
                 query = text("""
                     SELECT table_name, '' as table_comment
                     FROM information_schema.tables 
@@ -272,7 +280,25 @@ class DatabaseConnectionService:
                     AND table_type = 'BASE TABLE'
                     ORDER BY table_name
                 """)
-            elif db_connection.db_type.value == "sqlite":
+            elif db_type == "oracle":
+                query = text("""
+                    SELECT table_name, comments as table_comment
+                    FROM user_tab_comments 
+                    WHERE table_type = 'TABLE'
+                    ORDER BY table_name
+                """)
+            elif db_type == "sqlserver":
+                query = text("""
+                    SELECT t.name as table_name, 
+                           ISNULL(ep.value, '') as table_comment
+                    FROM sys.tables t
+                    LEFT JOIN sys.extended_properties ep 
+                        ON ep.major_id = t.object_id 
+                        AND ep.minor_id = 0 
+                        AND ep.name = 'MS_Description'
+                    ORDER BY t.name
+                """)
+            elif db_type == "sqlite":
                 query = text("""
                     SELECT name as table_name, '' as table_comment
                     FROM sqlite_master 
@@ -301,21 +327,35 @@ class DatabaseConnectionService:
         views = []
         
         try:
-            if db_connection.db_type.value == "mysql":
+            db_type = db_connection.db_type.value
+            
+            if db_type == "mysql":
                 query = text("""
                     SELECT table_name 
                     FROM information_schema.views 
                     WHERE table_schema = DATABASE()
                     ORDER BY table_name
                 """)
-            elif db_connection.db_type.value == "postgresql":
+            elif db_type == "postgresql":
                 query = text("""
                     SELECT table_name 
                     FROM information_schema.views 
                     WHERE table_schema = 'public'
                     ORDER BY table_name
                 """)
-            elif db_connection.db_type.value == "sqlite":
+            elif db_type == "oracle":
+                query = text("""
+                    SELECT view_name as table_name
+                    FROM user_views
+                    ORDER BY view_name
+                """)
+            elif db_type == "sqlserver":
+                query = text("""
+                    SELECT name as table_name
+                    FROM sys.views
+                    ORDER BY name
+                """)
+            elif db_type == "sqlite":
                 query = text("""
                     SELECT name as table_name
                     FROM sqlite_master 

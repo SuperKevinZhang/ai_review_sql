@@ -6,6 +6,12 @@ from typing import List, Set, Dict, Any
 from sqlparse.sql import IdentifierList, Identifier, Function
 from sqlparse.tokens import Keyword, DML
 
+try:
+    from sql_metadata import get_query_tables, get_query_columns
+    SQL_METADATA_AVAILABLE = True
+except ImportError:
+    SQL_METADATA_AVAILABLE = False
+
 
 class SQLParser:
     """SQL解析器，用于提取SQL中的表名和视图名"""
@@ -28,22 +34,87 @@ class SQLParser:
         self.view_names.clear()
         
         try:
+            # 优先使用sql-metadata库
+            if SQL_METADATA_AVAILABLE:
+                return self._extract_with_sql_metadata(sql)
+            else:
+                # 回退到原有方法
+                return self._extract_with_sqlparse(sql)
+        except Exception as e:
+            print(f"SQL解析失败，使用备选方案: {e}")
+            # 如果解析失败，使用正则表达式作为备选方案
+            return self._fallback_parse(sql)
+    
+    def _extract_with_sql_metadata(self, sql: str) -> Dict[str, List[str]]:
+        """使用sql-metadata库提取表名"""
+        try:
+            # 获取所有表名
+            tables = get_query_tables(sql)
+            
+            # 清理表名（移除schema前缀等）
+            cleaned_tables = []
+            for table in tables:
+                # 处理schema.table格式
+                if '.' in table:
+                    table = table.split('.')[-1]
+                # 移除引号
+                table = table.strip('"').strip("'").strip('`')
+                if table and self._is_valid_identifier(table):
+                    cleaned_tables.append(table)
+            
+            print(f"sql-metadata提取到的表名: {cleaned_tables}")
+            
+            return {
+                "tables": cleaned_tables,
+                "views": []  # sql-metadata无法区分表和视图，统一当作表处理
+            }
+        except Exception as e:
+            print(f"sql-metadata解析失败: {e}")
+            # 回退到sqlparse方法
+            return self._extract_with_sqlparse(sql)
+    
+    def _extract_with_sqlparse(self, sql: str) -> Dict[str, List[str]]:
+        """使用sqlparse库提取表名（原有方法的改进版）"""
+        try:
             # 解析SQL语句
             parsed = sqlparse.parse(sql)
             
             for statement in parsed:
-                self._extract_from_statement(statement)
+                self._extract_from_statement_improved(statement)
             
             return {
                 "tables": list(self.table_names),
                 "views": list(self.view_names)
             }
         except Exception as e:
-            # 如果解析失败，使用正则表达式作为备选方案
+            print(f"sqlparse解析失败: {e}")
             return self._fallback_parse(sql)
     
+    def _extract_from_statement_improved(self, statement):
+        """改进的表名提取方法"""
+        # 将SQL转换为字符串进行处理
+        sql_str = str(statement)
+        
+        # 使用正则表达式提取FROM和JOIN后的表名
+        patterns = [
+            r'\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\s*(?:[a-zA-Z_][a-zA-Z0-9_]*)?',
+            r'\bJOIN\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\s*(?:[a-zA-Z_][a-zA-Z0-9_]*)?',
+            r'\bINNER\s+JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\s*(?:[a-zA-Z_][a-zA-Z0-9_]*)?',
+            r'\bLEFT\s+JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\s*(?:[a-zA-Z_][a-zA-Z0-9_]*)?',
+            r'\bRIGHT\s+JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\s*(?:[a-zA-Z_][a-zA-Z0-9_]*)?',
+            r'\bFULL\s+JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\s*(?:[a-zA-Z_][a-zA-Z0-9_]*)?',
+            r'\bINTO\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)',
+            r'\bUPDATE\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)',
+        ]
+        
+        for pattern in patterns:
+            matches = re.finditer(pattern, sql_str, re.IGNORECASE)
+            for match in matches:
+                table_name = match.group(1)
+                self._extract_table_name(table_name)
+    
     def _extract_from_statement(self, statement):
-        """从SQL语句中提取表名"""
+        """从SQL语句中提取表名（原有方法，保留作为备用）"""
         # 使用更简单的方法，直接查找FROM和JOIN后的标识符
         tokens = list(statement.flatten())
         
@@ -117,10 +188,14 @@ class SQLParser:
         """备选解析方法，使用正则表达式"""
         tables = set()
         
-        # 简单的正则表达式模式
+        # 更全面的正则表达式模式
         patterns = [
             r'\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)',
             r'\bJOIN\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)',
+            r'\bINNER\s+JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)',
+            r'\bLEFT\s+JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)',
+            r'\bRIGHT\s+JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)',
+            r'\bFULL\s+JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)',
             r'\bINTO\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)',
             r'\bUPDATE\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)',
         ]
@@ -131,7 +206,12 @@ class SQLParser:
                 table_name = match.group(1)
                 if '.' in table_name:
                     table_name = table_name.split('.')[-1]
-                tables.add(table_name)
+                # 移除引号
+                table_name = table_name.strip('"').strip("'").strip('`')
+                if table_name and self._is_valid_identifier(table_name):
+                    tables.add(table_name)
+        
+        print(f"备选方案提取到的表名: {list(tables)}")
         
         return {
             "tables": list(tables),

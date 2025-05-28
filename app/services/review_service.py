@@ -13,6 +13,7 @@ from app.models.sql_statement import SQLStatement
 from app.models.review_report import ReviewReport, ReviewStatus
 from app.models.db_connection import DatabaseConnection
 from app.models.llm_config import LLMConfig
+from app.utils.database_utils import DatabaseUtils
 
 
 class ReviewService:
@@ -22,6 +23,7 @@ class ReviewService:
         self.db = db
         self.sql_parser = SQLParser()
         self.encryption_service = EncryptionService()
+        self.database_utils = DatabaseUtils()
     
     def review_sql_statement(self, sql_statement_id: int, llm_config_id: Optional[int] = None) -> Dict[str, Any]:
         """
@@ -65,13 +67,17 @@ class ReviewService:
             # 步骤3: 解析SQL，提取表名
             parse_result = self.sql_parser.parse(sql_statement.sql_content)
             table_names = parse_result["tables"] + parse_result["views"]
-            
+            # 打印表名
+            print("***************************表名:")
+            print(table_names)
             if not table_names:
                 return {"error": "无法从SQL中提取表名"}
             
             # 步骤4: 获取数据库模式信息
             schema_info = self._get_schema_info(sql_statement.db_connection, table_names)
-            
+            # 打印模式信息
+            print("***************************模式信息:")
+            print(schema_info)
             # 步骤5: 调用AI进行审查
             ai_reviewer = AIReviewer(llm_config)
             review_result = ai_reviewer.review_sql(
@@ -131,8 +137,8 @@ class ReviewService:
     def _get_schema_info(self, db_connection: DatabaseConnection, table_names: list) -> Dict[str, Any]:
         """获取数据库模式信息"""
         try:
-            # 构建数据库连接字符串
-            connection_string = self._build_connection_string(db_connection)
+            # 使用共通工具类构建数据库连接字符串
+            connection_string = self.database_utils.build_connection_string(db_connection)
             
             # 创建数据库引擎
             engine = create_engine(connection_string)
@@ -149,37 +155,21 @@ class ReviewService:
             print(f"获取数据库模式信息失败: {e}")
             return {"tables": [], "views": []}
     
-    def _build_connection_string(self, db_connection: DatabaseConnection) -> str:
-        """构建数据库连接字符串"""
-        # 解密密码
-        password = self.encryption_service.decrypt_password(db_connection.password)
-        
-        if db_connection.db_type.value == "mysql":
-            return f"mysql+pymysql://{db_connection.username}:{password}@{db_connection.host}:{db_connection.port}/{db_connection.database_name}"
-        elif db_connection.db_type.value == "postgresql":
-            return f"postgresql+psycopg2://{db_connection.username}:{password}@{db_connection.host}:{db_connection.port}/{db_connection.database_name}"
-        elif db_connection.db_type.value == "sqlserver":
-            return f"mssql+pyodbc://{db_connection.username}:{password}@{db_connection.host}:{db_connection.port}/{db_connection.database_name}?driver=ODBC+Driver+17+for+SQL+Server"
-        elif db_connection.db_type.value == "sqlite":
-            return f"sqlite:///{db_connection.database_name}"
-        else:
-            raise ValueError(f"不支持的数据库类型: {db_connection.db_type.value}")
-    
     def _test_database_connection(self, db_connection: DatabaseConnection) -> Dict[str, Any]:
         """测试数据库连接"""
         try:
-            # 构建连接字符串
-            connection_string = self._build_connection_string(db_connection)
+            # 使用共通工具类构建连接字符串
+            connection_string = self.database_utils.build_connection_string(db_connection)
             
             # 创建临时引擎进行连接测试
             test_engine = create_engine(connection_string, pool_pre_ping=True)
             
+            # 获取数据库特定的测试查询
+            test_query = self.database_utils.get_database_specific_test_query(db_connection.db_type)
+            
             # 尝试连接并执行简单查询
             with test_engine.connect() as conn:
-                if db_connection.db_type.value == "sqlite":
-                    conn.execute(text("SELECT 1"))
-                else:
-                    conn.execute(text("SELECT 1 as test"))
+                conn.execute(text(test_query))
             
             test_engine.dispose()
             return {"success": True, "message": "数据库连接成功"}
